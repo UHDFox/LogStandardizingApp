@@ -1,18 +1,20 @@
 using System.Globalization;
 using System.Text;
+using System.Text.RegularExpressions;
 
 namespace LogStandardizingApp;
 
 public sealed class LogHandler
 {
-    private string LogPath { get; }
+    private string LogPath { get; } = "./inputLogs.txt";
+    private List<string> Problems { get; set; } = new List<string>();
 
-    public LogHandler(string logPath)
+    public LogHandler(string? logPath)
     {
         LogPath = logPath;
     }
 
-    public string ReadLog(string filePath)
+    public string ReadLog(string? filePath)
     {
         if (string.IsNullOrEmpty(filePath))
         {
@@ -36,28 +38,72 @@ public sealed class LogHandler
     public string ConfigureLog(List<Dictionary<string, string>> logs)
     {
         var finalLog = new StringBuilder();
+        
 
         foreach (var log in logs)
         {
+            ValidateKeys(log);
 
-            finalLog.Append(ConvertTimeFormat(log["Дата"])).Append(" ");
-            finalLog.Append(log["Время"]).Append(" ");
-            finalLog.Append(log["УровеньЛогирования"]).Append(" ");
-
-            // Если метод не указан, выводим DEFAULT
-            if (log.ContainsKey("ВызвавшийМетод"))
+            if (log.ContainsKey("Дата") && log.ContainsKey("Время") && log.ContainsKey("УровеньЛогирования"))
             {
-                finalLog.Append(log["ВызвавшийМетод"]).Append(" ");
+
+                finalLog.Append(ConvertTimeFormat(log["Дата"])).Append(" ");
+                
+                if (!IsValidTimeFormat(log["Время"]))
+                {
+                    Problems.Add($"Неверный формат времени: {log["Время"]}");
+                    continue;
+                }
+                
+                finalLog.Append(log["Время"]).Append(" ");
+                finalLog.Append(log["УровеньЛогирования"]).Append(" ");
+
+                // Если метод не указан, выводим DEFAULT
+                if (log.ContainsKey("ВызвавшийМетод"))
+                {
+                    finalLog.Append(log["ВызвавшийМетод"]).Append(" ");
+                }
+                else
+                {
+                    finalLog.Append("DEFAULT ");
+                }
+
+                finalLog.Append(log["Сообщение"]).Append("\n");
             }
             else
             {
-                finalLog.Append("DEFAULT ");
+                Problems.Add("Неправильный формат лога: " + string.Join(", ", log.Values));
             }
-
-            finalLog.Append(log["Сообщение"]).Append("\n");
+        }
+        
+                
+        if (Problems.Any())
+        {
+            File.WriteAllLines("./problems.txt", Problems);
+            
+            Console.WriteLine($"{Problems.Count} problems found");
         }
 
         return finalLog.ToString();
+    }
+    
+    private void ValidateKeys(Dictionary<string, string> log)
+    {
+        var validKeys = new List<string> { "Дата", "Время", "УровеньЛогирования", "ВызвавшийМетод", "Сообщение" };
+        
+        var incorrectKeys = log.Keys.Where(key => !validKeys.Contains(key)).ToList();
+        
+        if (incorrectKeys.Any())
+        {
+            Problems.Add("Неправильный ключ в логе: " + string.Join(", ", incorrectKeys));
+        }
+    }
+    
+    private bool IsValidTimeFormat(string time)
+    {
+        // Проверяем, что время имеет формат HH:mm:ss.SSS или HHmmss:SSS
+        var regex = new Regex(@"^\d{2}:\d{2}:\d{2}(\.\d+)?$|^\d{6}:\d{3}$");
+        return regex.IsMatch(time);
     }
 
     private string ConvertTimeFormat(string nonFormatDate)
@@ -89,13 +135,18 @@ public sealed class LogHandler
                 {
                     logData[lineInfo[0]] = lineInfo[1];
                 }
+                else
+                {
+                    // Если строка не соответствует нужному формату, добавим ее в список на запись в проблемные
+                    Problems.Add(line);
+                }
             }
 
             if (lineNum + 1 == lines.Length || string.IsNullOrWhiteSpace(lines[lineNum + 1]))
             {
                 if (logData.Count > 0)
                 {
-                    logs.Add(new Dictionary<string, string>(logData)); // Создаём копию
+                    logs.Add(new Dictionary<string, string>(logData));
                     logData.Clear();
                 }
             }
